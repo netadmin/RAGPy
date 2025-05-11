@@ -42,18 +42,23 @@ def main():
 
     # Define the prompt template
     prompt = PromptTemplate.from_template(
-        """You are an expert TiVo support assistant.
-Given the following extracted snippets from TiVo error code documentation,
-answer the question as concisely as possible with the exact definition.
-If the code isn't in the snippets, say "I don't know that code."
+    """You are an expert TiVo support specialist who helps users troubleshoot their TiVo devices and services.
+Your knowledge is based on official TiVo documentation. Be helpful, accurate, and concise.
 
-=== CONTEXT SNIPPETS ===
+When providing support:
+- Prioritize step-by-step troubleshooting when applicable
+- Include specific menu paths and button sequences when relevant
+- Reference model-specific information when available in the context
+- Explain technical terms in simple language
+
+=== CONTEXT INFORMATION ===
 {context}
 
-=== QUESTION ===
+=== USER QUESTION ===
 {question}
 
-=== ANSWER ==="""
+=== RESPONSE ===
+"""
     )
 
     print("🔗 Building RAG chain with modern runnable approach...")

@@ -16,7 +16,7 @@
             "name": "Ingest Test",
             "type": "debugpy",
             "request": "launch",
-            "program": "rag_ingest.py",
+            "program": "rag_ingest2.py",
             "args": ["--library-path", "D:/RAGTest"],
             "console": "integratedTerminal"
         },

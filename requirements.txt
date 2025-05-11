@@ -1,0 +1,12 @@
+# core
+langchain==0.3.25
+
+# new modular extras
+langchain-huggingface>=0.2.0
+langchain-chroma>=0.1.0
+langchain-ollama>=0.1.0
+
+# RAG support
+#chromadb>=1.0.8
+chromadb
+sentence-transformers>=2.2.2

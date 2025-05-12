@@ -206,11 +206,11 @@ if __name__ == "__main__":
         help="Root folder of your docs (PDF, DOCX, TXT, PY, MD, HTML)"
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=500,
+        "--chunk-size", type=int, default=800,
         help="Size of text chunks for embedding"
     )
     parser.add_argument(
-        "--chunk-overlap", type=int, default=100,
+        "--chunk-overlap", type=int, default=200,
         help="Overlap between chunks"
     )
     parser.add_argument(

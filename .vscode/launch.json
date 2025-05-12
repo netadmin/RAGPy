@@ -25,7 +25,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "rag_ingest.py",
-            "args": ["--library-path", "D:/TivoRAG"],
+            "args": ["--library-path", "D:/TivoRAGSub"],
             "console": "integratedTerminal"
         },
                {
@@ -33,7 +33,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "rag_query.py",
-            "args": ["--library-path", "D:/TivoRAG", "--top-k", "20"],
+            "args": ["--library-path", "D:/TivoRAGSub", "--top-k", "20"],
             "console": "integratedTerminal"
         },
     ]

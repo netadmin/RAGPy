@@ -1,12 +1,29 @@
-import os
-import sys
-import argparse
+import os, argparse
 
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import OllamaLLM
 from langchain.prompts import PromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
+
+def get_retriever(query, db, TOP_K):
+    # Detect if query is about an error message
+    if any(term in query.lower() for term in ["error", "code", "message", "failed"]):
+        print("🔍 Error message detected - using high precision retrieval")
+        retriever = db.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": int(TOP_K * 1.5)}  # Get more results than needed
+        )
+        results = retriever.invoke(query)
+        # Filter programmatically instead of using score_threshold
+        filtered_results = [doc for doc in results if doc.metadata.get("score", 0) > 0.6]
+        return filtered_results if filtered_results else results[:TOP_K]
+    else:
+        print("🔍 General query - using balanced retrieval")
+        return db.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": TOP_K, "fetch_k": TOP_K * 2, "lambda_mult": 0.7}
+        ).invoke(query)
 
 
 def main():
@@ -35,10 +52,24 @@ def main():
         persist_directory=VECTOR_DIR,
         embedding_function=embed_fn
     )
-    retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K})
+    #retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K})
+    # v2 retriever 
+    retriever = db.as_retriever(
+        search_type="similarity",  # Use standard similarity search
+        search_kwargs={
+            "k": TOP_K
+        }
+    )
 
     print(f"🤖 Initializing LLaMA3 via OllamaLLM")
-    llm = OllamaLLM(model=MODEL_NAME)
+    #llm = OllamaLLM(model=MODEL_NAME)
+    # v2
+    llm = OllamaLLM(
+        model=MODEL_NAME,
+        temperature=0.2,  # Lower temperature for more precise answers
+        top_p=0.9,        # Keep high-probability tokens
+        stop=["\n\n\n"],  # Prevent early stopping
+    )
 
     # Define the prompt template
     prompt = PromptTemplate.from_template(
@@ -60,11 +91,32 @@ When providing support:
 === RESPONSE ===
 """
     )
+    print("🔄 Setting up query transformation...")
+    # added v2
+    query_prompt = PromptTemplate.from_template(
+        """Given a user question, reformulate it to create an effective search query that will find technical documentation about the issue.
+    If the user mentions an error message or code, prioritize that in your reformulation.
+
+    User question: {question}
+    Search query:"""
+    )
+    
+    # Using modern pipe syntax instead of deprecated LLMChain
+    query_transformer = (
+        {"question": lambda x: x} | 
+        query_prompt | 
+        llm
+    )
 
     print("🔗 Building RAG chain with modern runnable approach...")
-    # Define the RAG chain using the modern runnable approach
+    # V2 Define the RAG chain using the modern runnable approach
     rag_chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
+        {
+            #"context": lambda x: retriever.invoke(query_transformer.invoke(x).strip()),
+            # v2
+            "context": lambda x: get_retriever(x, db, TOP_K), 
+            "question": RunnablePassthrough()
+        }
         | prompt
         | llm
     )

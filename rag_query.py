@@ -76,12 +76,6 @@ def main():
         persist_directory=VECTOR_DIR,
         embedding_function=embed_fn
     )
-    retriever = db.as_retriever(
-        search_type="similarity",  # Use standard similarity search
-        search_kwargs={
-            "k": TOP_K
-        }
-    )
 
     print("🤖 Initializing LLaMA3 via OllamaLLM")
     llm = OllamaLLM(
@@ -155,7 +149,6 @@ def main():
             answer = rag_chain.invoke(query)
 
             # Get source documents (this requires a separate call with the modern approach)
-            #sources = retriever.invoke(query)
             sources = retrieved_docs
 
             print("\n🧠 Answer:\n" + answer)

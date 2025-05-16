@@ -17,6 +17,44 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.schema import Document
 
+def calculate_content_quality(text: str) -> float:
+    """Calculate a quality score for chunk prioritization."""
+    # Simple heuristics for content quality:
+    quality = 1.0
+    
+    # Reward content with specific types of information
+    if re.search(r'step [0-9]|[0-9]\.\s+\w+', text, re.IGNORECASE):
+        quality *= 1.2  # Step-by-step instructions
+        
+    if re.search(r'error code|problem|issue|troubleshoot', text, re.IGNORECASE):
+        quality *= 1.15  # Error handling content
+        
+    if re.search(r'menu|button|press|select|choose', text, re.IGNORECASE):
+        quality *= 1.1  # UI navigation instructions
+    
+    # Penalize very short or likely unhelpful content
+    word_count = len(text.split())
+    if word_count < 20:
+        quality *= 0.7
+    
+    return quality
+
+def preprocess_content(content: str) -> str:
+    """Enhance content structure and readability for better chunking results."""
+    # Preserve list structures
+    content = re.sub(r'(\n\s*[-•*]\s+)', r'\n• ', content)
+    
+    # Preserve numbering
+    content = re.sub(r'(\n\s*\d+\.\s+)', lambda m: '\n' + m.group(1), content)
+    
+    # Ensure headers stand out
+    content = re.sub(r'([^\n])(\n#{1,6}\s+)', r'\1\n\n\2', content)
+    
+    # Preserve table structures better
+    content = re.sub(r'(\n\s*\|[^\n]+\|\s*\n)', lambda m: '\n' + m.group(1) + '\n', content)
+    
+    return content
+
 def get_semantic_splitter(chunk_size, chunk_overlap):
     """Create a splitter that attempts to preserve semantic units."""
     return RecursiveCharacterTextSplitter(
@@ -112,7 +150,9 @@ def ingest(
                 continue
             meta = clean_metadata(meta)
             meta["source"] = path  # Ensure source path is always included
-            docs.append(Document(page_content=content, metadata=meta))
+            # Preprocess content to better preserve structure
+            enhanced_content = preprocess_content(content)
+            docs.append(Document(page_content=enhanced_content, metadata=meta))
             count += 1
         if count > 0:
             print(f"    ✅ Queued {count} pieces from {fn}")
@@ -218,6 +258,9 @@ def ingest(
         else:
             # Use default char splitter for all other docs
             doc_chunks = default_splitter.split_documents([doc])
+            for chunk in doc_chunks:
+                # Add quality score to metadata
+                chunk.metadata["quality_score"] = calculate_content_quality(chunk.page_content)
             chunks.extend(doc_chunks)
     
     print(f"✂️ {len(chunks)} chunks generated")
@@ -274,11 +317,11 @@ if __name__ == "__main__":
         help="Root folder of your docs (PDF, DOCX, TXT, PY, MD, HTML)"
     )
     parser.add_argument(
-        "--chunk-size", type=int, default=800,
+        "--chunk-size", type=int, default=1200,
         help="Size of text chunks for embedding"
     )
     parser.add_argument(
-        "--chunk-overlap", type=int, default=200,
+        "--chunk-overlap", type=int, default=300,
         help="Overlap between chunks"
     )
     parser.add_argument(

@@ -59,7 +59,7 @@ def main():
         help="Root folder of your docs (e.g. D:/TivoRAG)"
     )
     parser.add_argument(
-        "-k", "--top-k", type=int, default=10,
+        "-k", "--top-k", type=int, default=15,
         help="Number of chunks to retrieve per query"
     )
     args = parser.parse_args()
@@ -80,32 +80,36 @@ def main():
     print("🤖 Initializing LLaMA3 via OllamaLLM")
     llm = OllamaLLM(
         model=MODEL_NAME,
-        temperature=0.2,  # Lower temperature for more precise answers
+        temperature=0.3,  # Lower temperature for more precise answers
         top_p=0.9,        # Keep high-probability tokens
         stop=["\n\n\n"],  # Prevent early stopping
+        num_ctx=4096,        # Maximize context window utilization
+        system="You are a helpful assistant that provides comprehensive and detailed answers. Use multiple paragraphs when needed."
     )
 
     # Define the prompt template
     prompt = PromptTemplate.from_template(
-    """You are an expert TiVo support specialist who helps users troubleshoot their TiVo devices and services.
-    Your knowledge is based on official TiVo documentation. Be helpful, accurate, and concise.
+        """You are an expert TiVo support specialist who helps users troubleshoot their TiVo devices and services.
+        Your knowledge is based on official TiVo documentation. Be thorough, detailed, and comprehensive.
 
-    When providing support:
-    - Prioritize step-by-step troubleshooting when applicable
-    - Include specific menu paths and button sequences when relevant
-    - Reference model-specific information when available in the context
-    - Explain technical terms in simple language
-    - When referencing sources, use the document title or filename, not internal IDs or UUIDs
-    - If you're unsure about the exact source, simply state the information without referencing a specific document
+        When providing support:
+        - Provide detailed step-by-step troubleshooting instructions
+        - Include specific menu paths and button sequences when relevant
+        - Reference model-specific information when available in the context
+        - Explain technical concepts completely with examples where possible
+        - Include all relevant information from the documentation
+        - When you find multiple solutions in the documentation, include all of them
+        - Use bullet points and numbered lists to organize longer explanations
+        - When referencing sources, use the document title or filename, not internal IDs or UUIDs
 
-    === CONTEXT INFORMATION ===
-    {context}
+        === CONTEXT INFORMATION ===
+        {context}
 
-    === USER QUESTION ===
-    {question}
+        === USER QUESTION ===
+        {question}
 
-    === RESPONSE ===
-    """
+        === DETAILED RESPONSE ===
+        """
     )
 
     print("🔗 Building RAG chain with modern runnable approach...")
@@ -115,12 +119,24 @@ def main():
         docs = get_retriever(query, db, TOP_K)
         retrieved_docs = docs
         
-        # Format context with document titles
+        # Format context with richer document information
         formatted_context = []
         for i, doc in enumerate(docs):
-            # Get document title or filename as fallback
             title = doc.metadata.get('title', os.path.basename(doc.metadata.get('source', 'Unknown')))
-            formatted_context.append(f"[Document: {title}]\n{doc.page_content}\n")
+            date_info = doc.metadata.get('date', '').split('T')[0] if 'date' in doc.metadata else ''
+            
+            # Format each document with clear boundaries and metadata
+            context_entry = f"--- DOCUMENT {i+1}: {title} {f'({date_info})' if date_info else ''} ---\n"
+            context_entry += f"{doc.page_content}\n"
+            
+            # Include relevance score information
+            score = doc.metadata.get('score', doc.metadata.get('combined_score', 0))
+            if score:
+                # Only add this internally - helpful for debugging but not needed for the final prompt
+                # context_entry += f"[Relevance: {score:.2f}]\n"
+                pass
+                
+            formatted_context.append(context_entry)
         
         return "\n".join(formatted_context)
         

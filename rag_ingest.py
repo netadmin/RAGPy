@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os
+import os, re
 import sys
 import argparse
 import torch
@@ -17,6 +17,14 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.schema import Document
 
+def get_semantic_splitter(chunk_size, chunk_overlap):
+    """Create a splitter that attempts to preserve semantic units."""
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", ". ", "! ", "? ", ";", ":", " ", ""],
+        keep_separator=True
+    )
 
 def clean_metadata(raw_meta: dict) -> dict:
     """Keep only primitive metadata values."""
@@ -50,7 +58,8 @@ def ingest(
     chunk_size: int = 500,
     chunk_overlap: int = 100,
     incremental: bool = False,
-    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    #model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    model_name: str = "BAAI/bge-large-en-v1.5",
 ):
     output_path = os.path.join(library_path, "vector_index_chroma")
     os.makedirs(output_path, exist_ok=True)
@@ -124,14 +133,79 @@ def ingest(
     }
     
     # Default splitter for all document types
-    default_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size, 
-        chunk_overlap=chunk_overlap
-    )
+    #default_splitter = RecursiveCharacterTextSplitter(
+    #    chunk_size=chunk_size, 
+    #    chunk_overlap=chunk_overlap
+    #)
+    
+    #May 16, 2025
+    default_splitter = get_semantic_splitter(chunk_size, chunk_overlap)
     
     # Process each document with appropriate splitter
     chunks = []
     for doc in tqdm(docs, desc="Chunking documents"):
+        
+            # Extract rich metadata from filename
+        filename = os.path.basename(doc.metadata.get("source", ""))
+        base_name = os.path.splitext(filename)[0]
+        
+        # Extract title (remove date patterns if present)
+        title = base_name.replace("_", " ").title()
+        
+        # Try to extract date from filename using regex
+        # Handles formats like: 2023-05-16, 20230516, 05-16-2023, etc.
+        date_patterns = [
+            r'(\d{4}[-_]\d{2}[-_]\d{2})',  # YYYY-MM-DD or YYYY_MM_DD
+            r'(\d{2}[-_]\d{2}[-_]\d{4})',  # MM-DD-YYYY or MM_DD_YYYY
+            r'(\d{8})',                     # YYYYMMDD
+            r'(\d{2}[A-Z]{3}\d{4})'         # Format like 05FEB2024
+        ]
+        
+        doc_date = None
+        for pattern in date_patterns:
+            match = re.search(pattern, filename)
+            if match:
+                date_str = match.group(1)
+                try:
+                    # Attempt to parse the date based on its format
+                    if '-' in date_str or '_' in date_str:
+                        sep = '-' if '-' in date_str else '_'
+                        parts = date_str.split(sep)
+                        if len(parts[0]) == 4:  # YYYY-MM-DD
+                            doc_date = datetime.strptime(date_str, f'%Y{sep}%m{sep}%d')
+                        else:  # MM-DD-YYYY
+                            doc_date = datetime.strptime(date_str, f'%m{sep}%d{sep}%Y')
+                    elif re.match(r'\d{2}[A-Z]{3}\d{4}', date_str):  # 05FEB2024 format
+                        try:
+                            doc_date = datetime.strptime(date_str, '%d%b%Y')
+                        except ValueError:
+                            # Sometimes uppercase month codes need special handling
+                            date_str_lower = date_str[:2] + date_str[2:5].lower() + date_str[5:]
+                            doc_date = datetime.strptime(date_str_lower, '%d%b%Y')
+                    else:  # YYYYMMDD
+                        doc_date = datetime.strptime(date_str, '%Y%m%d')
+                    
+                    # Clean title by removing the date pattern
+                    title = re.sub(pattern, '', title).strip()
+                    break
+                except ValueError:
+                    continue
+        
+        # Add enhanced metadata
+        doc.metadata["title"] = title
+        doc.metadata["doc_id"] = hash_content(doc.page_content)[:8]
+        
+        # Add date metadata if found
+        if doc_date:
+            doc.metadata["date"] = doc_date.isoformat()
+            doc.metadata["timestamp"] = doc_date.timestamp()
+            # Add recency score (higher for newer docs)
+            days_old = (datetime.now() - doc_date).days
+            # Normalize to 0-1 range (1 is newest, 0 is oldest)
+            # Assuming docs within last 5 years (1825 days)
+            recency_score = max(0, min(1, 1 - (days_old / 1825)))
+            doc.metadata["recency_score"] = recency_score
+            
         doc_ext = os.path.splitext(doc.metadata.get("source", ""))[1].lower()
         specialized_splitter = ext_to_splitter.get(doc_ext)
         
@@ -218,7 +292,8 @@ if __name__ == "__main__":
         help="Only process new or modified files since last run"
     )
     parser.add_argument(
-        "--model", default="sentence-transformers/all-MiniLM-L6-v2",
+        "--model", default="BAAI/bge-large-en-v1.5",
+        #"--model", default="sentence-transformers/all-MiniLM-L6-v2",
         help="Embedding model to use"
     )
     

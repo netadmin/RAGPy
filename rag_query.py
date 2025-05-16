@@ -7,17 +7,41 @@ from langchain.prompts import PromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
 
 def get_retriever(query, db, TOP_K):
-    # Detect if query is about an error message
-    if any(term in query.lower() for term in ["error", "code", "message", "failed"]):
-        print("🔍 Error message detected - using high precision retrieval")
+    # Check if query implies time sensitivity
+    time_sensitive = any(term in query.lower() for term in [
+        "recent", "latest", "newest", "update", "current", 
+        "today", "month", "year", "version"
+    ])
+    
+    if time_sensitive:
+        print("🕒 Time-sensitive query detected - prioritizing recent documents")
+        # Use hybrid search with custom scoring
         retriever = db.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": int(TOP_K * 1.5)}  # Get more results than needed
+            search_kwargs={"k": TOP_K * 2}  # Get more results than needed
         )
         results = retriever.invoke(query)
-        # Filter programmatically instead of using score_threshold
-        filtered_results = [doc for doc in results if doc.metadata.get("score", 0) > 0.6]
-        return filtered_results if filtered_results else results[:TOP_K]
+        
+        # Rerank results by combining semantic score with recency
+        for doc in results:
+            # Default recency score if missing
+            recency = doc.metadata.get("recency_score", 0.5)
+            # Combine semantic similarity with recency (70% similarity, 30% recency)
+            combined_score = 0.7 * doc.metadata.get("score", 0) + 0.3 * recency
+            doc.metadata["combined_score"] = combined_score
+        
+        # Sort by combined score
+        results = sorted(results, key=lambda d: d.metadata.get("combined_score", 0), reverse=True)
+        return results[:TOP_K]
+    
+    # Your existing retrieval logic
+    elif any(term in query.lower() for term in ["error", "code", "message", "failed"]):
+        print("🔍 Error message detected - using high precision retrieval")
+        # Use similarity search with higher k to prioritize exact matches
+        return db.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": TOP_K}
+        ).invoke(query)
     else:
         print("🔍 General query - using balanced retrieval")
         return db.as_retriever(
@@ -46,14 +70,12 @@ def main():
 
     print(f"🔌 Loading Chroma store from: {VECTOR_DIR}")
     embed_fn = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="BAAI/bge-large-en-v1.5"  # Match the model used in ingest
     )
     db = Chroma(
         persist_directory=VECTOR_DIR,
         embedding_function=embed_fn
     )
-    #retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K})
-    # v2 retriever 
     retriever = db.as_retriever(
         search_type="similarity",  # Use standard similarity search
         search_kwargs={
@@ -61,9 +83,7 @@ def main():
         }
     )
 
-    print(f"🤖 Initializing LLaMA3 via OllamaLLM")
-    #llm = OllamaLLM(model=MODEL_NAME)
-    # v2
+    print("🤖 Initializing LLaMA3 via OllamaLLM")
     llm = OllamaLLM(
         model=MODEL_NAME,
         temperature=0.2,  # Lower temperature for more precise answers
@@ -74,47 +94,45 @@ def main():
     # Define the prompt template
     prompt = PromptTemplate.from_template(
     """You are an expert TiVo support specialist who helps users troubleshoot their TiVo devices and services.
-Your knowledge is based on official TiVo documentation. Be helpful, accurate, and concise.
+    Your knowledge is based on official TiVo documentation. Be helpful, accurate, and concise.
 
-When providing support:
-- Prioritize step-by-step troubleshooting when applicable
-- Include specific menu paths and button sequences when relevant
-- Reference model-specific information when available in the context
-- Explain technical terms in simple language
+    When providing support:
+    - Prioritize step-by-step troubleshooting when applicable
+    - Include specific menu paths and button sequences when relevant
+    - Reference model-specific information when available in the context
+    - Explain technical terms in simple language
+    - When referencing sources, use the document title or filename, not internal IDs or UUIDs
+    - If you're unsure about the exact source, simply state the information without referencing a specific document
 
-=== CONTEXT INFORMATION ===
-{context}
+    === CONTEXT INFORMATION ===
+    {context}
 
-=== USER QUESTION ===
-{question}
+    === USER QUESTION ===
+    {question}
 
-=== RESPONSE ===
-"""
-    )
-    print("🔄 Setting up query transformation...")
-    # added v2
-    query_prompt = PromptTemplate.from_template(
-        """Given a user question, reformulate it to create an effective search query that will find technical documentation about the issue.
-    If the user mentions an error message or code, prioritize that in your reformulation.
-
-    User question: {question}
-    Search query:"""
-    )
-    
-    # Using modern pipe syntax instead of deprecated LLMChain
-    query_transformer = (
-        {"question": lambda x: x} | 
-        query_prompt | 
-        llm
+    === RESPONSE ===
+    """
     )
 
     print("🔗 Building RAG chain with modern runnable approach...")
     # V2 Define the RAG chain using the modern runnable approach
+    def get_context_and_store(query):
+        nonlocal retrieved_docs
+        docs = get_retriever(query, db, TOP_K)
+        retrieved_docs = docs
+        
+        # Format context with document titles
+        formatted_context = []
+        for i, doc in enumerate(docs):
+            # Get document title or filename as fallback
+            title = doc.metadata.get('title', os.path.basename(doc.metadata.get('source', 'Unknown')))
+            formatted_context.append(f"[Document: {title}]\n{doc.page_content}\n")
+        
+        return "\n".join(formatted_context)
+        
     rag_chain = (
         {
-            #"context": lambda x: retriever.invoke(query_transformer.invoke(x).strip()),
-            # v2
-            "context": lambda x: get_retriever(x, db, TOP_K), 
+            "context": lambda x: get_context_and_store(x),
             "question": RunnablePassthrough()
         }
         | prompt
@@ -131,21 +149,33 @@ When providing support:
             continue
 
         try:
+            # Initialize storage for this query
+            retrieved_docs = []
             # Directly invoke the chain with the query
             answer = rag_chain.invoke(query)
-            
+
             # Get source documents (this requires a separate call with the modern approach)
-            sources = retriever.invoke(query)
-            print("\n🔍 Raw retrieved content:")
-            for i, doc in enumerate(sources):
-                print(f"\n--- Document {i+1} ---")
-                print(doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content)
-                
+            #sources = retriever.invoke(query)
+            sources = retrieved_docs
+
             print("\n🧠 Answer:\n" + answer)
             print("\n📚 Sources:")
+            # Track unique sources to avoid duplicates
+            seen_sources = set()
             for doc in sources:
-                print(f"  • {doc.metadata.get('source', 'Unknown')}")
-                
+                source = doc.metadata.get('source', 'Unknown')
+                date_info = ""
+                if "date" in doc.metadata:
+                    date_info = f" (dated: {doc.metadata['date'][:10]})"
+
+                # Create a unique identifier for this source
+                source_key = f"{source}{date_info}"
+
+                # Only print if we haven't seen this source before
+                if source_key not in seen_sources:
+                    seen_sources.add(source_key)
+                    print(f"  • {source}{date_info}")
+
         except Exception as e:
             print(f"❌ Query error: {e}")
             continue

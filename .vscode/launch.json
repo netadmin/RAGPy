@@ -13,11 +13,15 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Ingest Test",
+            "name": "Ingest flows",
             "type": "debugpy",
             "request": "launch",
-            "program": "rag_ingest2.py",
-            "args": ["--library-path", "D:/RAGTest"],
+            "program": "flows_xlsx.py",
+            "args": ["--excel-path", 
+                    "D:/TivoRAGSub/Flows 2025-01-22.xlsx", 
+                    "--db-dir", 
+                    "D:/TivoRAGSub/vector_index_chroma"
+                ],  
             "console": "integratedTerminal"
         },
         {

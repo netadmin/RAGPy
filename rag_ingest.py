@@ -132,12 +132,6 @@ def ingest(
         # Add more specialized splitters as needed
     }
     
-    # Default splitter for all document types
-    #default_splitter = RecursiveCharacterTextSplitter(
-    #    chunk_size=chunk_size, 
-    #    chunk_overlap=chunk_overlap
-    #)
-    
     #May 16, 2025
     default_splitter = get_semantic_splitter(chunk_size, chunk_overlap)
     

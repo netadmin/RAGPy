@@ -59,7 +59,7 @@ def main():
         help="Root folder of your docs (e.g. D:/TivoRAG)"
     )
     parser.add_argument(
-        "-k", "--top-k", type=int, default=15,
+        "-k", "--top-k", type=int, default=20,
         help="Number of chunks to retrieve per query"
     )
     args = parser.parse_args()
@@ -100,7 +100,7 @@ def main():
      
     # Define the prompt template
     prompt = PromptTemplate.from_template(
-        """You are an expert TiVo support specialist who helps users troubleshoot their TiVo devices and services.
+        """You are an expert TiVo support specialist and solution architect integrator who helps customers troubleshoot their TiVo IPTV Service.
         Your knowledge is based on official TiVo documentation. Be thorough, detailed, and comprehensive.
 
         When providing support:
@@ -112,6 +112,10 @@ def main():
         - When you find multiple solutions in the documentation, include all of them
         - Use bullet points and numbered lists to organize longer explanations
         - When referencing sources, use the document title or filename, not internal IDs or UUIDs
+        - Always provide exhaustive information - never summarize or abbreviate content from the documentation
+        - Include contextual explanations for technical terms
+        - Format your answer with clear sections and subsections
+        - Remember that users need complete information, so provide all details from the documentation
 
         === CONTEXT INFORMATION ===
         {context}

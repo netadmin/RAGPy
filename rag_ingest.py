@@ -333,6 +333,10 @@ if __name__ == "__main__":
         #"--model", default="sentence-transformers/all-MiniLM-L6-v2",
         help="Embedding model to use"
     )
+    parser.add_argument(
+        "--flows-excel-path", "-e", required=False, 
+        help="Path to the Excel file (e.g. Flows 2025-01-22.xlsx)"
+    )
     
     args = parser.parse_args()
 

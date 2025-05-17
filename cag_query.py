@@ -52,7 +52,7 @@ def get_retriever(query, db, TOP_K):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Query your Chroma RAG index with Ollama LLaMA3."
+        description="CAG query with Qwen."
     )
     parser.add_argument(
         "-l", "--library-path", required=True,
@@ -77,24 +77,14 @@ def main():
         embedding_function=embed_fn
     )
 
-   
-    #MODEL_NAME = "llama3"
-    #llm = OllamaLLM(
-    #    model=MODEL_NAME,
-    #    temperature=0.3,  # Lower temperature for more precise answers
-    #    top_p=0.9,        # Keep high-probability tokens
-    #    stop=["\n\n\n"],  # Prevent early stopping
-    #    num_ctx=4096,        # Maximize context window utilization
-    #    system="You are a helpful assistant that provides comprehensive and detailed answers. Use multiple paragraphs when needed."
-    #)
     MODEL_NAME = "qwen3:4b" # or "qwen:14b" or "qwen2:7b"
     llm = OllamaLLM(
         model=MODEL_NAME,
         temperature=0.2,     # Lower temperature for Qwen works well for documentation
         top_p=0.95,          # Slightly higher for more comprehensive content
-        stop=["\n\n\n\n"],   # Less restrictive stopping
+        #stop=["\n\n\n\n"],   # Less restrictive stopping
         num_ctx=4096,
-        system="You are a technical support specialist who provides exceptionally detailed, thorough answers. Always include all relevant information from documentation. Be comprehensive and use multiple paragraphs to fully explain concepts."
+        system="Answer the user's question using ONLY the context provided. If the context does not answer, say 'Not found in context.'"
     )
     print(f"🤖 Loaded {MODEL_NAME} via OllamaLLM")
      
@@ -126,83 +116,35 @@ def main():
         === DETAILED RESPONSE ===
         """
     )
-
-    print("🔗 Building RAG chain...")
-    
-    def get_context_and_store(query):
-        nonlocal retrieved_docs
-        docs = get_retriever(query, db, TOP_K)
-        retrieved_docs = docs
         
-        # Format context with richer document information
-        formatted_context = []
-        for i, doc in enumerate(docs):
-            title = doc.metadata.get('title', os.path.basename(doc.metadata.get('source', 'Unknown')))
-            date_info = doc.metadata.get('date', '').split('T')[0] if 'date' in doc.metadata else ''
-            
-            # Format each document with clear boundaries and metadata
-            context_entry = f"--- DOCUMENT {i+1}: {title} {f'({date_info})' if date_info else ''} ---\n"
-            context_entry += f"{doc.page_content}\n"
-            
-            # Include relevance score information
-            score = doc.metadata.get('score', doc.metadata.get('combined_score', 0))
-            if score:
-                # Only add this internally - helpful for debugging but not needed for the final prompt
-                # context_entry += f"[Relevance: {score:.2f}]\n"
-                pass
-                
-            formatted_context.append(context_entry)
-        
-        return "\n".join(formatted_context)
-        
-    rag_chain = (
-        {
-            "context": lambda x: get_context_and_store(x),
-            "question": RunnablePassthrough()
-        }
-        | prompt
-        | llm
-    )
-    
     print("\n✅ Ready! Type your query or 'exit' to quit.\n")
     while True:
         query = input("❓ Query> ").strip()
-        if query.lower() in ("exit", "quit"):
-            print("👋 Goodbye!")
-            break
-        if not query:
-            continue
+        if query.lower() in ("exit", "quit"): break
+        if not query: continue
 
-        try:
-            # Initialize storage for this query
-            retrieved_docs = []
-            # Directly invoke the chain with the query
-            answer = rag_chain.invoke(query)
+        # 1. Retrieve chunks
+        docs = db.as_retriever(search_type="similarity", search_kwargs={"k": args.top_k}).invoke(query)
+        
+        # 2. Query Qwen per chunk
+        answers = []
+        for i, doc in enumerate(docs):
+            ctx = doc.page_content
+            filled_prompt = prompt.format(context=ctx, question=query)
+            answer = llm.invoke(filled_prompt)
+            answers.append((i+1, doc, answer.strip()))
 
-            # Get source documents (this requires a separate call with the modern approach)
-            sources = retrieved_docs
+        # 3. Display chunk-wise answers
+        print("\n🧠 Chunk-level Answers:")
+        for idx, doc, ans in answers:
+            title = doc.metadata.get('title', os.path.basename(doc.metadata.get('source', 'Unknown')))
+            print(f"\n--- Chunk {idx} ({title}) ---\n{ans}")
 
-            print("\n🧠 Answer:\n" + answer)
-            print("\n📚 Sources:")
-            # Track unique sources to avoid duplicates
-            seen_sources = set()
-            for doc in sources:
-                source = doc.metadata.get('source', 'Unknown')
-                date_info = ""
-                if "date" in doc.metadata:
-                    date_info = f" (dated: {doc.metadata['date'][:10]})"
-
-                # Create a unique identifier for this source
-                source_key = f"{source}{date_info}"
-
-                # Only print if we haven't seen this source before
-                if source_key not in seen_sources:
-                    seen_sources.add(source_key)
-                    print(f"  • {source}{date_info}")
-
-        except Exception as e:
-            print(f"❌ Query error: {e}")
-            continue
+        # 4. Optional: "Synthesize" final answer (e.g., majority vote or send all answers to Qwen again for summary)
+        print("\n🔗 Synthesized Final Answer (auto summary):")
+        synthesized = llm.invoke("Summarize or synthesize the best possible answer from these:\n" +
+                                 "\n".join(f"Chunk {i}: {a}" for i, _, a in answers))
+        print(synthesized)
 
 if __name__ == "__main__":
     main()

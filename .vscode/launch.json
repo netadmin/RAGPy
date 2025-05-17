@@ -32,11 +32,19 @@
             "args": ["--library-path", "D:/TivoRAGSub"],
             "console": "integratedTerminal"
         },
-               {
-            "name": "Query Full",
+        {
+            "name": "RAG Query",
             "type": "debugpy",
             "request": "launch",
             "program": "rag_query.py",
+            "args": ["--library-path", "D:/TivoRAGSub", "--top-k", "20"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "CAG Query",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "cag_query.py",
             "args": ["--library-path", "D:/TivoRAGSub", "--top-k", "20"],
             "console": "integratedTerminal"
         },

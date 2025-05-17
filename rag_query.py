@@ -65,7 +65,7 @@ def main():
     args = parser.parse_args()
 
     VECTOR_DIR = os.path.join(args.library_path, "vector_index_chroma")
-    MODEL_NAME = "llama3"
+    
     TOP_K = args.top_k
 
     print(f"🔌 Loading Chroma store from: {VECTOR_DIR}")
@@ -77,16 +77,27 @@ def main():
         embedding_function=embed_fn
     )
 
-    print("🤖 Initializing LLaMA3 via OllamaLLM")
+   
+    #MODEL_NAME = "llama3"
+    #llm = OllamaLLM(
+    #    model=MODEL_NAME,
+    #    temperature=0.3,  # Lower temperature for more precise answers
+    #    top_p=0.9,        # Keep high-probability tokens
+    #    stop=["\n\n\n"],  # Prevent early stopping
+    #    num_ctx=4096,        # Maximize context window utilization
+    #    system="You are a helpful assistant that provides comprehensive and detailed answers. Use multiple paragraphs when needed."
+    #)
+    MODEL_NAME = "qwen3:4b" # or "qwen:14b" or "qwen2:7b"
     llm = OllamaLLM(
         model=MODEL_NAME,
-        temperature=0.3,  # Lower temperature for more precise answers
-        top_p=0.9,        # Keep high-probability tokens
-        stop=["\n\n\n"],  # Prevent early stopping
-        num_ctx=4096,        # Maximize context window utilization
-        system="You are a helpful assistant that provides comprehensive and detailed answers. Use multiple paragraphs when needed."
+        temperature=0.2,     # Lower temperature for Qwen works well for documentation
+        top_p=0.95,          # Slightly higher for more comprehensive content
+        stop=["\n\n\n\n"],   # Less restrictive stopping
+        num_ctx=4096,
+        system="You are a technical support specialist who provides exceptionally detailed, thorough answers. Always include all relevant information from documentation. Be comprehensive and use multiple paragraphs to fully explain concepts."
     )
-
+    print(f"🤖 Loaded {MODEL_NAME} via OllamaLLM")
+     
     # Define the prompt template
     prompt = PromptTemplate.from_template(
         """You are an expert TiVo support specialist who helps users troubleshoot their TiVo devices and services.
